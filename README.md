@@ -20,6 +20,14 @@ By default `con:color/1` will adjust the text (foreground) color. To adjust the 
 con:color({red, <<66:8, 42:8, 190:8>>}).
 ```
 
+### Gradients
+RGB Linear gradients can be created with true colors.
+
+* `con:gradient(word, "Red to green", {255, 0, 0}, {0, 255, 0})`
+* `con:gradient(letter, "Blue to yellow", {0, 0, 255}, {0, 255, 255})`
+
+May introduce other color-space gradients in the future, such as HSV.
+
 ## Styles
 
 Set styles with `con:style/1` and revert style with `con:reset/1`. Revert all style changes with `con:style(default)` or `con:reset/0`. The list of available styles is returned in `con:style/0`. Which styles are supported will vary between terminal emulators.

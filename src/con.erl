@@ -164,7 +164,14 @@ gradient(word, Text, Color1, Color2) ->
     Sections = string:split(lists:flatten(Text), " ", all),
     Steps = length(Sections)-1,
     Colors = con_tools:color_fade(Color1, Color2, Steps),
-    lists:join(" ", [[color(C), S] || {C, S} <- lists:zip(Colors, Sections)]).
+    lists:join(" ", [[color(C), S] || {C, S} <- lists:zip(Colors, Sections)]);
+gradient(letter, Text, Color1, Color2) ->
+    Sections = lists:flatten(Text),
+    Steps = length(Sections)-1,
+    Colors = con_tools:color_fade(Color1, Color2, Steps),
+    [[color(C), S] || {C, S} <- lists:zip(Colors, Sections)].
+
+
 
 cursor_code(up) -> $A;
 cursor_code(down) -> $B;
