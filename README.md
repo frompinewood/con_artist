@@ -3,7 +3,7 @@ Make beautiful terminal applications with Erlang
 
 ## Colors
 
-Supports 8/16 color mode, 256 color mode, and true color mode.
+Supports 8/16 color mode, 256 color mode, and true color mode. Available colors in 8 color mode can be found in `con:basic_colors/0` and the additional 8 colors for 16 color mode can be found in `con:basic_colors_bright/0`.
 
 ``` erlang
 con:color(red), % 8 color mode 
@@ -22,7 +22,7 @@ con:color({red, <<66:8, 42:8, 190:8>>}).
 
 ## Styles
 
-Set styles with `con:style/1` and revert style with `con:reset/1`. Revert all style changes with `con:style(default)` or `con:reset/0`.
+Set styles with `con:style/1` and revert style with `con:reset/1`. Revert all style changes with `con:style(default)` or `con:reset/0`. The list of available styles is returned in `con:style/0`. Which styles are supported will vary between terminal emulators.
 
 ## Cursor 
 

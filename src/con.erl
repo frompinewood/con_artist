@@ -5,7 +5,7 @@
 -export([erase_line/1, erase_display/1, color/1, cursor/1, style/1, reset/0, reset/1]).
 -export([scroll_up/0, scroll_up/1, scroll_down/0, scroll_down/1]).
 
--export([basic_colors/0, basic_colors_bright/0]).
+-export([basic_colors/0, basic_colors_bright/0, styles/0]).
 
 -export([gradient/4]).
 
@@ -34,6 +34,15 @@
 -type con_cursor() :: con_cursor_dir() | {con_cursor_dir() | integer()} | {pos, integer(), integer()}.
 
 -type con_erase() :: back | forward | all.
+
+-spec styles() -> [atom()].
+styles() ->
+    [default, bold, faint, underline, italic,
+                     blink, fast_blink, invert, hide, strike,
+                     double_underline, framed, encircled,
+                     overlined, ideogram_underine, ideogram_overline,
+                     ideogram_double_overline, ideogram_stress,
+                     superscript, subscript].
 
 -spec style(con_style()) -> iodata().
 style(Style) ->
