@@ -1,0 +1,42 @@
+%% C0 Escape Sequences
+-define(NUL, 0). % Null
+-define(SOH, 1). % Start of Heading
+-define(STX, 2). % Start of Text
+-define(ETX, 3). % End of Text
+-define(EOT, 4). % End of Transmission
+-define(ENQ, 5). % Enquiry
+-define(ACK, 6). % Acknowledge
+-define(BEL, 7). % Bell
+-define(BS, 8). % Backspace
+-define(HT, 9). % Horizontal Tab
+-define(LF, 10). % Line Feed
+-define(VT, 11). % Vertical Tab
+-define(FF, 12). % Form Feed
+-define(CR, 13). % Carriage Return
+-define(SO, 14). % Shift Out
+-define(SI, 15). % Shift In
+-define(DLE, 16). % Data Link Escape
+-define(DC1, 17). % Device Control One
+-define(DC2, 18). % Device Control Two
+-define(DC3, 19). % Device Control Three
+-define(DC4, 20). % Device Control Four
+-define(NAK, 21). % Negative Acknowledge
+-define(SYN, 22). % Syncronous Idle
+-define(ETB, 23). % End of Transmission Block
+-define(CAN, 24). % Cancel
+-define(EM, 25). % End of medium
+-define(SUB, 26). % Substitute
+-define(ESC, 27). % Escape
+-define(FS, 28). % File Seperator
+-define(GS, 29). % Group Seperator
+-define(RS, 30). % Record Seperator
+-define(US, 31). % Unit Seperator
+-define(ESC(IOData), [?ESC, IOData]).
+
+%% Fe Escape Sequences
+-define(SS2, ?ESC($N)).
+-define(SS3, ?ESC($O)).
+-define(ST, ?ESC($\\)).
+-define(DCS(IOData), [?ESC($P), IOData, $ST]).
+-define(CSI(IOData), [?ESC($[), IOData]).
+-define(OSC(IOData), [?ESC($]), IOData, ?ST]).
