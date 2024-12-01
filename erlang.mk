@@ -17,7 +17,7 @@
 ERLANG_MK_FILENAME := $(realpath $(lastword $(MAKEFILE_LIST)))
 export ERLANG_MK_FILENAME
 
-ERLANG_MK_VERSION = 9376f53
+ERLANG_MK_VERSION = 509b15b
 ERLANG_MK_WITHOUT = 
 
 # Make 3.81 and 3.82 are deprecated.
@@ -66,7 +66,7 @@ export ERLANG_MK_TMP
 
 # "erl" command.
 
-ERL = erl +A1 -noinput -boot no_dot_erlang
+ERL = erl -noinput -boot no_dot_erlang -kernel start_distribution false +P 1024 +Q 1024
 
 # Platform detection.
 
@@ -520,6 +520,10 @@ query_extra_fail = -
 
 query_absolute_path = $(addprefix $(DEPS_DIR)/,$(call query_name,$1))
 
+# Deprecated legacy query function. Used by RabbitMQ and its third party plugins.
+# Can be removed once RabbitMQ has been updated and enough time has passed.
+dep_name = $(call query_name,$(1))
+
 # Application directories.
 
 LOCAL_DEPS_DIRS = $(foreach a,$(LOCAL_DEPS),$(if $(wildcard $(APPS_DIR)/$a),$(APPS_DIR)/$a))
@@ -855,6 +859,12 @@ define dep_autopatch_rebar.erl
 			GetHexVsn3Common(N, NP, S0);
 		(N, NP, S) -> {N, {hex, NP, S}}
 	end,
+	ConvertCommit = fun
+		({branch, C}) -> C;
+		({ref, C}) -> C;
+		({tag, C}) -> C;
+		(C) -> C
+	end,
 	fun() ->
 		File = case lists:keyfind(deps, 1, Conf) of
 			false -> [];
@@ -870,16 +880,15 @@ define dep_autopatch_rebar.erl
 							_ -> false
 						end of
 					false -> ok;
+					{Name, {git_subdir, Repo, Commit, SubDir}} ->
+						Write(io_lib:format("DEPS += ~s\ndep_~s = git-subfolder ~s ~s ~s~n", [Name, Name, Repo, ConvertCommit(Commit), SubDir]));
 					{Name, Source} ->
 						{Method, Repo, Commit} = case Source of
 							{hex, NPV, V} -> {hex, V, NPV};
 							{git, R} -> {git, R, master};
-							{M, R, {branch, C}} -> {M, R, C};
-							{M, R, {ref, C}} -> {M, R, C};
-							{M, R, {tag, C}} -> {M, R, C};
 							{M, R, C} -> {M, R, C}
 						end,
-						Write(io_lib:format("DEPS += ~s\ndep_~s = ~s ~s ~s~n", [Name, Name, Method, Repo, Commit]))
+						Write(io_lib:format("DEPS += ~s\ndep_~s = ~s ~s ~s~n", [Name, Name, Method, Repo, ConvertCommit(Commit)]))
 				end end || Dep <- Deps]
 		end
 	end(),
@@ -1235,7 +1244,7 @@ define dep_fetch_fail
 endef
 
 define dep_target
-$(DEPS_DIR)/$(call query_name,$1): $(if $(filter hex,$(call query_fetch_method,$1)),hex-core) | $(ERLANG_MK_TMP)
+$(DEPS_DIR)/$(call query_name,$1): | $(if $(filter hex,$(call query_fetch_method,$1)),hex-core) $(ERLANG_MK_TMP)
 	$(eval DEP_NAME := $(call query_name,$1))
 	$(eval DEP_STR := $(if $(filter $1,$(DEP_NAME)),$1,"$1 ($(DEP_NAME))"))
 	$(verbose) if test -d $(APPS_DIR)/$(DEP_NAME); then \
@@ -1270,6 +1279,8 @@ endef
 # We automatically depend on hex_core when the project isn't already.
 $(if $(filter hex_core,$(DEPS) $(BUILD_DEPS) $(DOC_DEPS) $(REL_DEPS) $(TEST_DEPS)),,\
 	$(eval $(call dep_target,hex_core)))
+
+.PHONY: hex-core
 
 hex-core: $(DEPS_DIR)/hex_core
 	$(verbose) if [ ! -e $(DEPS_DIR)/hex_core/ebin/dep_built ]; then \
@@ -1892,6 +1903,377 @@ endef
 rebar.config: deps
 	$(gen_verbose) $(call core_render,compat_rebar_config,rebar.config)
 
+define tpl_application.app.src
+{application, project_name, [
+	{description, ""},
+	{vsn, "0.1.0"},
+	{id, "git"},
+	{modules, []},
+	{registered, []},
+	{applications, [
+		kernel,
+		stdlib
+	]},
+	{mod, {project_name_app, []}},
+	{env, []}
+]}.
+endef
+
+define tpl_application
+-module(project_name_app).
+-behaviour(application).
+
+-export([start/2]).
+-export([stop/1]).
+
+start(_Type, _Args) ->
+	project_name_sup:start_link().
+
+stop(_State) ->
+	ok.
+endef
+
+define tpl_apps_Makefile
+PROJECT = project_name
+PROJECT_DESCRIPTION = New project
+PROJECT_VERSION = 0.1.0
+template_sp
+# Make sure we know where the applications are located.
+ROOT_DIR ?= rel_root_dir
+APPS_DIR ?= ..
+DEPS_DIR ?= rel_deps_dir
+
+include rel_root_dir/erlang.mk
+endef
+
+define tpl_cowboy_http_h
+-module(template_name).
+-behaviour(cowboy_http_handler).
+
+-export([init/3]).
+-export([handle/2]).
+-export([terminate/3]).
+
+-record(state, {
+}).
+
+init(_, Req, _Opts) ->
+	{ok, Req, #state{}}.
+
+handle(Req, State=#state{}) ->
+	{ok, Req2} = cowboy_req:reply(200, Req),
+	{ok, Req2, State}.
+
+terminate(_Reason, _Req, _State) ->
+	ok.
+endef
+
+define tpl_cowboy_loop_h
+-module(template_name).
+-behaviour(cowboy_loop_handler).
+
+-export([init/3]).
+-export([info/3]).
+-export([terminate/3]).
+
+-record(state, {
+}).
+
+init(_, Req, _Opts) ->
+	{loop, Req, #state{}, 5000, hibernate}.
+
+info(_Info, Req, State) ->
+	{loop, Req, State, hibernate}.
+
+terminate(_Reason, _Req, _State) ->
+	ok.
+endef
+
+define tpl_cowboy_rest_h
+-module(template_name).
+
+-export([init/3]).
+-export([content_types_provided/2]).
+-export([get_html/2]).
+
+init(_, _Req, _Opts) ->
+	{upgrade, protocol, cowboy_rest}.
+
+content_types_provided(Req, State) ->
+	{[{{<<"text">>, <<"html">>, '*'}, get_html}], Req, State}.
+
+get_html(Req, State) ->
+	{<<"<html><body>This is REST!</body></html>">>, Req, State}.
+endef
+
+define tpl_cowboy_websocket_h
+-module(template_name).
+-behaviour(cowboy_websocket_handler).
+
+-export([init/3]).
+-export([websocket_init/3]).
+-export([websocket_handle/3]).
+-export([websocket_info/3]).
+-export([websocket_terminate/3]).
+
+-record(state, {
+}).
+
+init(_, _, _) ->
+	{upgrade, protocol, cowboy_websocket}.
+
+websocket_init(_, Req, _Opts) ->
+	Req2 = cowboy_req:compact(Req),
+	{ok, Req2, #state{}}.
+
+websocket_handle({text, Data}, Req, State) ->
+	{reply, {text, Data}, Req, State};
+websocket_handle({binary, Data}, Req, State) ->
+	{reply, {binary, Data}, Req, State};
+websocket_handle(_Frame, Req, State) ->
+	{ok, Req, State}.
+
+websocket_info(_Info, Req, State) ->
+	{ok, Req, State}.
+
+websocket_terminate(_Reason, _Req, _State) ->
+	ok.
+endef
+
+define tpl_gen_fsm
+-module(template_name).
+-behaviour(gen_fsm).
+
+%% API.
+-export([start_link/0]).
+
+%% gen_fsm.
+-export([init/1]).
+-export([state_name/2]).
+-export([handle_event/3]).
+-export([state_name/3]).
+-export([handle_sync_event/4]).
+-export([handle_info/3]).
+-export([terminate/3]).
+-export([code_change/4]).
+
+-record(state, {
+}).
+
+%% API.
+
+-spec start_link() -> {ok, pid()}.
+start_link() ->
+	gen_fsm:start_link(?MODULE, [], []).
+
+%% gen_fsm.
+
+init([]) ->
+	{ok, state_name, #state{}}.
+
+state_name(_Event, StateData) ->
+	{next_state, state_name, StateData}.
+
+handle_event(_Event, StateName, StateData) ->
+	{next_state, StateName, StateData}.
+
+state_name(_Event, _From, StateData) ->
+	{reply, ignored, state_name, StateData}.
+
+handle_sync_event(_Event, _From, StateName, StateData) ->
+	{reply, ignored, StateName, StateData}.
+
+handle_info(_Info, StateName, StateData) ->
+	{next_state, StateName, StateData}.
+
+terminate(_Reason, _StateName, _StateData) ->
+	ok.
+
+code_change(_OldVsn, StateName, StateData, _Extra) ->
+	{ok, StateName, StateData}.
+endef
+
+define tpl_gen_server
+-module(template_name).
+-behaviour(gen_server).
+
+%% API.
+-export([start_link/0]).
+
+%% gen_server.
+-export([init/1]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+
+-record(state, {
+}).
+
+%% API.
+
+-spec start_link() -> {ok, pid()}.
+start_link() ->
+	gen_server:start_link(?MODULE, [], []).
+
+%% gen_server.
+
+init([]) ->
+	{ok, #state{}}.
+
+handle_call(_Request, _From, State) ->
+	{reply, ignored, State}.
+
+handle_cast(_Msg, State) ->
+	{noreply, State}.
+
+handle_info(_Info, State) ->
+	{noreply, State}.
+
+terminate(_Reason, _State) ->
+	ok.
+
+code_change(_OldVsn, State, _Extra) ->
+	{ok, State}.
+endef
+
+define tpl_gen_statem
+-module(template_name).
+-behaviour(gen_statem).
+
+%% API.
+-export([start_link/0]).
+
+%% gen_statem.
+-export([callback_mode/0]).
+-export([init/1]).
+-export([state_name/3]).
+-export([handle_event/4]).
+-export([terminate/3]).
+-export([code_change/4]).
+
+-record(state, {
+}).
+
+%% API.
+
+-spec start_link() -> {ok, pid()}.
+start_link() ->
+	gen_statem:start_link(?MODULE, [], []).
+
+%% gen_statem.
+
+callback_mode() ->
+	state_functions.
+
+init([]) ->
+	{ok, state_name, #state{}}.
+
+state_name(_EventType, _EventData, StateData) ->
+	{next_state, state_name, StateData}.
+
+handle_event(_EventType, _EventData, StateName, StateData) ->
+	{next_state, StateName, StateData}.
+
+terminate(_Reason, _StateName, _StateData) ->
+	ok.
+
+code_change(_OldVsn, StateName, StateData, _Extra) ->
+	{ok, StateName, StateData}.
+endef
+
+define tpl_library.app.src
+{application, project_name, [
+	{description, ""},
+	{vsn, "0.1.0"},
+	{id, "git"},
+	{modules, []},
+	{registered, []},
+	{applications, [
+		kernel,
+		stdlib
+	]}
+]}.
+endef
+
+define tpl_module
+-module(template_name).
+-export([]).
+endef
+
+define tpl_ranch_protocol
+-module(template_name).
+-behaviour(ranch_protocol).
+
+-export([start_link/4]).
+-export([init/4]).
+
+-type opts() :: [].
+-export_type([opts/0]).
+
+-record(state, {
+	socket :: inet:socket(),
+	transport :: module()
+}).
+
+start_link(Ref, Socket, Transport, Opts) ->
+	Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
+	{ok, Pid}.
+
+-spec init(ranch:ref(), inet:socket(), module(), opts()) -> ok.
+init(Ref, Socket, Transport, _Opts) ->
+	ok = ranch:accept_ack(Ref),
+	loop(#state{socket=Socket, transport=Transport}).
+
+loop(State) ->
+	loop(State).
+endef
+
+define tpl_relx.config
+{release, {project_name_release, "1"}, [project_name, sasl, runtime_tools]}.
+{dev_mode, false}.
+{include_erts, true}.
+{extended_start_script, true}.
+{sys_config, "config/sys.config"}.
+{vm_args, "config/vm.args"}.
+endef
+
+define tpl_supervisor
+-module(template_name).
+-behaviour(supervisor).
+
+-export([start_link/0]).
+-export([init/1]).
+
+start_link() ->
+	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init([]) ->
+	Procs = [],
+	{ok, {{one_for_one, 1, 5}, Procs}}.
+endef
+
+define tpl_sys.config
+[
+].
+endef
+
+define tpl_top_Makefile
+PROJECT = project_name
+PROJECT_DESCRIPTION = New project
+PROJECT_VERSION = 0.1.0
+template_sp
+include erlang.mk
+endef
+
+define tpl_vm.args
+-name project_name@127.0.0.1
+-setcookie project_name
+-heart
+endef
+
+
 # Copyright (c) 2015-2016, Loïc Hoguin <essen@ninenines.eu>
 # This file is part of erlang.mk and subject to the terms of the ISC License.
 
@@ -1994,387 +2376,6 @@ help::
 		"  new t=T n=N in=APP Generate a module NAME based on the template TPL in APP" \
 		"  list-templates     List available templates"
 
-# Bootstrap templates.
-
-define bs_appsrc
-{application, $p, [
-	{description, ""},
-	{vsn, "0.1.0"},
-	{id, "git"},
-	{modules, []},
-	{registered, []},
-	{applications, [
-		kernel,
-		stdlib
-	]},
-	{mod, {$p_app, []}},
-	{env, []}
-]}.
-endef
-
-define bs_appsrc_lib
-{application, $p, [
-	{description, ""},
-	{vsn, "0.1.0"},
-	{id, "git"},
-	{modules, []},
-	{registered, []},
-	{applications, [
-		kernel,
-		stdlib
-	]}
-]}.
-endef
-
-# To prevent autocompletion issues with ZSH, we add "include erlang.mk"
-# separately during the actual bootstrap.
-define bs_Makefile
-PROJECT = $p
-PROJECT_DESCRIPTION = New project
-PROJECT_VERSION = 0.1.0
-$(if $(SP),
-# Whitespace to be used when creating files from templates.
-SP = $(SP)
-)
-endef
-
-define bs_apps_Makefile
-PROJECT = $p
-PROJECT_DESCRIPTION = New project
-PROJECT_VERSION = 0.1.0
-$(if $(SP),
-# Whitespace to be used when creating files from templates.
-SP = $(SP)
-)
-# Make sure we know where the applications are located.
-ROOT_DIR ?= $(call core_relpath,$(dir $(ERLANG_MK_FILENAME)),$(APPS_DIR)/app)
-APPS_DIR ?= ..
-DEPS_DIR ?= $(call core_relpath,$(DEPS_DIR),$(APPS_DIR)/app)
-
-include $$(ROOT_DIR)/erlang.mk
-endef
-
-define bs_app
--module($p_app).
--behaviour(application).
-
--export([start/2]).
--export([stop/1]).
-
-start(_Type, _Args) ->
-	$p_sup:start_link().
-
-stop(_State) ->
-	ok.
-endef
-
-define bs_relx_config
-{release, {$p_release, "1"}, [$p, sasl, runtime_tools]}.
-{dev_mode, false}.
-{include_erts, true}.
-{extended_start_script, true}.
-{sys_config, "config/sys.config"}.
-{vm_args, "config/vm.args"}.
-endef
-
-define bs_sys_config
-[
-].
-endef
-
-define bs_vm_args
--name $p@127.0.0.1
--setcookie $p
--heart
-endef
-
-# Normal templates.
-
-define tpl_supervisor
--module($(n)).
--behaviour(supervisor).
-
--export([start_link/0]).
--export([init/1]).
-
-start_link() ->
-	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-init([]) ->
-	Procs = [],
-	{ok, {{one_for_one, 1, 5}, Procs}}.
-endef
-
-define tpl_gen_server
--module($(n)).
--behaviour(gen_server).
-
-%% API.
--export([start_link/0]).
-
-%% gen_server.
--export([init/1]).
--export([handle_call/3]).
--export([handle_cast/2]).
--export([handle_info/2]).
--export([terminate/2]).
--export([code_change/3]).
-
--record(state, {
-}).
-
-%% API.
-
--spec start_link() -> {ok, pid()}.
-start_link() ->
-	gen_server:start_link(?MODULE, [], []).
-
-%% gen_server.
-
-init([]) ->
-	{ok, #state{}}.
-
-handle_call(_Request, _From, State) ->
-	{reply, ignored, State}.
-
-handle_cast(_Msg, State) ->
-	{noreply, State}.
-
-handle_info(_Info, State) ->
-	{noreply, State}.
-
-terminate(_Reason, _State) ->
-	ok.
-
-code_change(_OldVsn, State, _Extra) ->
-	{ok, State}.
-endef
-
-define tpl_module
--module($(n)).
--export([]).
-endef
-
-define tpl_cowboy_http
--module($(n)).
--behaviour(cowboy_http_handler).
-
--export([init/3]).
--export([handle/2]).
--export([terminate/3]).
-
--record(state, {
-}).
-
-init(_, Req, _Opts) ->
-	{ok, Req, #state{}}.
-
-handle(Req, State=#state{}) ->
-	{ok, Req2} = cowboy_req:reply(200, Req),
-	{ok, Req2, State}.
-
-terminate(_Reason, _Req, _State) ->
-	ok.
-endef
-
-define tpl_gen_fsm
--module($(n)).
--behaviour(gen_fsm).
-
-%% API.
--export([start_link/0]).
-
-%% gen_fsm.
--export([init/1]).
--export([state_name/2]).
--export([handle_event/3]).
--export([state_name/3]).
--export([handle_sync_event/4]).
--export([handle_info/3]).
--export([terminate/3]).
--export([code_change/4]).
-
--record(state, {
-}).
-
-%% API.
-
--spec start_link() -> {ok, pid()}.
-start_link() ->
-	gen_fsm:start_link(?MODULE, [], []).
-
-%% gen_fsm.
-
-init([]) ->
-	{ok, state_name, #state{}}.
-
-state_name(_Event, StateData) ->
-	{next_state, state_name, StateData}.
-
-handle_event(_Event, StateName, StateData) ->
-	{next_state, StateName, StateData}.
-
-state_name(_Event, _From, StateData) ->
-	{reply, ignored, state_name, StateData}.
-
-handle_sync_event(_Event, _From, StateName, StateData) ->
-	{reply, ignored, StateName, StateData}.
-
-handle_info(_Info, StateName, StateData) ->
-	{next_state, StateName, StateData}.
-
-terminate(_Reason, _StateName, _StateData) ->
-	ok.
-
-code_change(_OldVsn, StateName, StateData, _Extra) ->
-	{ok, StateName, StateData}.
-endef
-
-define tpl_gen_statem
--module($(n)).
--behaviour(gen_statem).
-
-%% API.
--export([start_link/0]).
-
-%% gen_statem.
--export([callback_mode/0]).
--export([init/1]).
--export([state_name/3]).
--export([handle_event/4]).
--export([terminate/3]).
--export([code_change/4]).
-
--record(state, {
-}).
-
-%% API.
-
--spec start_link() -> {ok, pid()}.
-start_link() ->
-	gen_statem:start_link(?MODULE, [], []).
-
-%% gen_statem.
-
-callback_mode() ->
-	state_functions.
-
-init([]) ->
-	{ok, state_name, #state{}}.
-
-state_name(_EventType, _EventData, StateData) ->
-	{next_state, state_name, StateData}.
-
-handle_event(_EventType, _EventData, StateName, StateData) ->
-	{next_state, StateName, StateData}.
-
-terminate(_Reason, _StateName, _StateData) ->
-	ok.
-
-code_change(_OldVsn, StateName, StateData, _Extra) ->
-	{ok, StateName, StateData}.
-endef
-
-define tpl_cowboy_loop
--module($(n)).
--behaviour(cowboy_loop_handler).
-
--export([init/3]).
--export([info/3]).
--export([terminate/3]).
-
--record(state, {
-}).
-
-init(_, Req, _Opts) ->
-	{loop, Req, #state{}, 5000, hibernate}.
-
-info(_Info, Req, State) ->
-	{loop, Req, State, hibernate}.
-
-terminate(_Reason, _Req, _State) ->
-	ok.
-endef
-
-define tpl_cowboy_rest
--module($(n)).
-
--export([init/3]).
--export([content_types_provided/2]).
--export([get_html/2]).
-
-init(_, _Req, _Opts) ->
-	{upgrade, protocol, cowboy_rest}.
-
-content_types_provided(Req, State) ->
-	{[{{<<"text">>, <<"html">>, '*'}, get_html}], Req, State}.
-
-get_html(Req, State) ->
-	{<<"<html><body>This is REST!</body></html>">>, Req, State}.
-endef
-
-define tpl_cowboy_ws
--module($(n)).
--behaviour(cowboy_websocket_handler).
-
--export([init/3]).
--export([websocket_init/3]).
--export([websocket_handle/3]).
--export([websocket_info/3]).
--export([websocket_terminate/3]).
-
--record(state, {
-}).
-
-init(_, _, _) ->
-	{upgrade, protocol, cowboy_websocket}.
-
-websocket_init(_, Req, _Opts) ->
-	Req2 = cowboy_req:compact(Req),
-	{ok, Req2, #state{}}.
-
-websocket_handle({text, Data}, Req, State) ->
-	{reply, {text, Data}, Req, State};
-websocket_handle({binary, Data}, Req, State) ->
-	{reply, {binary, Data}, Req, State};
-websocket_handle(_Frame, Req, State) ->
-	{ok, Req, State}.
-
-websocket_info(_Info, Req, State) ->
-	{ok, Req, State}.
-
-websocket_terminate(_Reason, _Req, _State) ->
-	ok.
-endef
-
-define tpl_ranch_protocol
--module($(n)).
--behaviour(ranch_protocol).
-
--export([start_link/4]).
--export([init/4]).
-
--type opts() :: [].
--export_type([opts/0]).
-
--record(state, {
-	socket :: inet:socket(),
-	transport :: module()
-}).
-
-start_link(Ref, Socket, Transport, Opts) ->
-	Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
-	{ok, Pid}.
-
--spec init(ranch:ref(), inet:socket(), module(), opts()) -> ok.
-init(Ref, Socket, Transport, _Opts) ->
-	ok = ranch:accept_ack(Ref),
-	loop(#state{socket=Socket, transport=Transport}).
-
-loop(State) ->
-	loop(State).
-endef
-
 # Plugin-specific targets.
 
 ifndef WS
@@ -2385,6 +2386,26 @@ WS = $(tab)
 endif
 endif
 
+ifdef SP
+define template_sp
+
+# By default templates indent with a single tab per indentation
+# level. Set this variable to the number of spaces you prefer:
+SP = $(SP)
+
+endef
+else
+template_sp =
+endif
+
+# @todo Additional template placeholders could be added.
+subst_template = $(subst rel_root_dir,$(call core_relpath,$(dir $(ERLANG_MK_FILENAME)),$(APPS_DIR)/app),$(subst rel_deps_dir,$(call core_relpath,$(DEPS_DIR),$(APPS_DIR)/app),$(subst template_sp,$(template_sp),$(subst project_name,$p,$(subst template_name,$n,$1)))))
+
+define core_render_template
+	$(eval define _tpl_$(1)$(newline)$(call subst_template,$(tpl_$(1)))$(newline)endef)
+	$(verbose) $(call core_render,_tpl_$(1),$2)
+endef
+
 bootstrap:
 ifneq ($(wildcard src/),)
 	$(error Error: src/ directory already exists)
@@ -2393,14 +2414,13 @@ endif
 	$(if $(shell echo $p | LC_ALL=C grep -x "[a-z0-9_]*"),,\
 		$(error Error: Invalid characters in the application name))
 	$(eval n := $(PROJECT)_sup)
-	$(verbose) $(call core_render,bs_Makefile,Makefile)
-	$(verbose) echo "include erlang.mk" >> Makefile
+	$(verbose) $(call core_render_template,top_Makefile,Makefile)
 	$(verbose) mkdir src/
 ifdef LEGACY
-	$(verbose) $(call core_render,bs_appsrc,src/$(PROJECT).app.src)
+	$(verbose) $(call core_render_template,application.app.src,src/$(PROJECT).app.src)
 endif
-	$(verbose) $(call core_render,bs_app,src/$(PROJECT)_app.erl)
-	$(verbose) $(call core_render,tpl_supervisor,src/$(PROJECT)_sup.erl)
+	$(verbose) $(call core_render_template,application,src/$(PROJECT)_app.erl)
+	$(verbose) $(call core_render_template,supervisor,src/$(PROJECT)_sup.erl)
 
 bootstrap-lib:
 ifneq ($(wildcard src/),)
@@ -2409,11 +2429,10 @@ endif
 	$(eval p := $(PROJECT))
 	$(if $(shell echo $p | LC_ALL=C grep -x "[a-z0-9_]*"),,\
 		$(error Error: Invalid characters in the application name))
-	$(verbose) $(call core_render,bs_Makefile,Makefile)
-	$(verbose) echo "include erlang.mk" >> Makefile
+	$(verbose) $(call core_render_template,top_Makefile,Makefile)
 	$(verbose) mkdir src/
 ifdef LEGACY
-	$(verbose) $(call core_render,bs_appsrc_lib,src/$(PROJECT).app.src)
+	$(verbose) $(call core_render_template,library.app.src,src/$(PROJECT).app.src)
 endif
 
 bootstrap-rel:
@@ -2424,10 +2443,10 @@ ifneq ($(wildcard config/),)
 	$(error Error: config/ directory already exists)
 endif
 	$(eval p := $(PROJECT))
-	$(verbose) $(call core_render,bs_relx_config,relx.config)
+	$(verbose) $(call core_render_template,relx.config,relx.config)
 	$(verbose) mkdir config/
-	$(verbose) $(call core_render,bs_sys_config,config/sys.config)
-	$(verbose) $(call core_render,bs_vm_args,config/vm.args)
+	$(verbose) $(call core_render_template,sys.config,config/sys.config)
+	$(verbose) $(call core_render_template,vm.args,config/vm.args)
 	$(verbose) awk '/^include erlang.mk/ && !ins {print "REL_DEPS += relx";ins=1};{print}' Makefile > Makefile.bak
 	$(verbose) mv Makefile.bak Makefile
 
@@ -2443,12 +2462,12 @@ endif
 		$(error Error: Invalid characters in the application name))
 	$(eval n := $(in)_sup)
 	$(verbose) mkdir -p $(APPS_DIR)/$p/src/
-	$(verbose) $(call core_render,bs_apps_Makefile,$(APPS_DIR)/$p/Makefile)
+	$(verbose) $(call core_render_template,apps_Makefile,$(APPS_DIR)/$p/Makefile)
 ifdef LEGACY
-	$(verbose) $(call core_render,bs_appsrc,$(APPS_DIR)/$p/src/$p.app.src)
+	$(verbose) $(call core_render_template,application.app.src,$(APPS_DIR)/$p/src/$p.app.src)
 endif
-	$(verbose) $(call core_render,bs_app,$(APPS_DIR)/$p/src/$p_app.erl)
-	$(verbose) $(call core_render,tpl_supervisor,$(APPS_DIR)/$p/src/$p_sup.erl)
+	$(verbose) $(call core_render_template,application,$(APPS_DIR)/$p/src/$p_app.erl)
+	$(verbose) $(call core_render_template,supervisor,$(APPS_DIR)/$p/src/$p_sup.erl)
 
 new-lib:
 ifndef in
@@ -2461,30 +2480,40 @@ endif
 	$(if $(shell echo $p | LC_ALL=C grep -x "[a-z0-9_]*"),,\
 		$(error Error: Invalid characters in the application name))
 	$(verbose) mkdir -p $(APPS_DIR)/$p/src/
-	$(verbose) $(call core_render,bs_apps_Makefile,$(APPS_DIR)/$p/Makefile)
+	$(verbose) $(call core_render_template,apps_Makefile,$(APPS_DIR)/$p/Makefile)
 ifdef LEGACY
-	$(verbose) $(call core_render,bs_appsrc_lib,$(APPS_DIR)/$p/src/$p.app.src)
+	$(verbose) $(call core_render_template,library.app.src,$(APPS_DIR)/$p/src/$p.app.src)
 endif
 
+# These are not necessary because we don't expose those as "normal" templates.
+BOOTSTRAP_TEMPLATES = apps_Makefile top_Makefile \
+	application.app.src library.app.src application \
+	relx.config sys.config vm.args
+
+# Templates may override the path they will be written to when using 'new'.
+# Only special template paths must be listed. Default is src/template_name.erl
+# Substitution is also applied to the paths. Examples:
+#
+#tplp_top_Makefile = Makefile
+#tplp_application.app.src = src/project_name.app.src
+#tplp_application = src/project_name_app.erl
+#tplp_relx.config = relx.config
+
+# Erlang.mk bundles its own templates at build time into the erlang.mk file.
+
 new:
-ifeq ($(wildcard src/)$(in),)
-	$(error Error: src/ directory does not exist)
-endif
-ifndef t
-	$(error Usage: $(MAKE) new t=TEMPLATE n=NAME [in=APP])
-endif
-ifndef n
-	$(error Usage: $(MAKE) new t=TEMPLATE n=NAME [in=APP])
-endif
-ifdef in
-	$(verbose) $(call core_render,tpl_$(t),$(APPS_DIR)/$(in)/src/$(n).erl)
-else
-	$(verbose) $(call core_render,tpl_$(t),src/$(n).erl)
-endif
+	$(if $(t),,$(error Usage: $(MAKE) new t=TEMPLATE n=NAME [in=APP]))
+	$(if $(n),,$(error Usage: $(MAKE) new t=TEMPLATE n=NAME [in=APP]))
+	$(if $(tpl_$(t)),,$(error Error: $t template does not exist; try $(Make) list-templates))
+	$(eval dest := $(if $(in),$(APPS_DIR)/$(in)/)$(call subst_template,$(if $(tplp_$(t)),$(tplp_$(t)),src/template_name.erl)))
+	$(if $(wildcard $(dir $(dest))),,$(error Error: $(dir $(dest)) directory does not exist))
+	$(if $(wildcard $(dest)),$(error Error: The file $(dest) already exists))
+	$(eval p := $(PROJECT))
+	$(call core_render_template,$(t),$(dest))
 
 list-templates:
 	$(verbose) @echo Available templates:
-	$(verbose) printf "    %s\n" $(sort $(patsubst tpl_%,%,$(filter tpl_%,$(.VARIABLES))))
+	$(verbose) printf "    %s\n" $(sort $(filter-out $(BOOTSTRAP_TEMPLATES),$(patsubst tpl_%,%,$(filter tpl_%,$(.VARIABLES)))))
 
 # Copyright (c) 2014-2016, Loïc Hoguin <essen@ninenines.eu>
 # This file is part of erlang.mk and subject to the terms of the ISC License.
@@ -3337,7 +3366,7 @@ HEX_TARBALL_FILES ?= \
 	$(sort $(call core_find,priv/,*)) \
 	$(wildcard README*) \
 	$(wildcard rebar.config) \
-	$(sort $(call core_find,src/,*))
+	$(sort $(if $(LEGACY),$(filter-out src/$(PROJECT).app.src,$(call core_find,src/,*)),$(call core_find,src/,*)))
 
 HEX_TARBALL_OUTPUT_FILE ?= $(ERLANG_MK_TMP)/$(PROJECT).tar
 
@@ -3796,17 +3825,13 @@ endef
 relx-rel: rel-deps app
 	$(call erlang,$(call relx_release.erl),-pa ebin/)
 	$(verbose) $(MAKE) relx-post-rel
-ifeq ($(RELX_TAR),1)
-	$(call erlang,$(call relx_tar.erl),-pa ebin/)
-endif
+	$(if $(filter-out 0,$(RELX_TAR)),$(call erlang,$(call relx_tar.erl),-pa ebin/))
 
 relx-relup: rel-deps app
 	$(call erlang,$(call relx_release.erl),-pa ebin/)
 	$(MAKE) relx-post-rel
 	$(call erlang,$(call relx_relup.erl),-pa ebin/)
-ifeq ($(RELX_TAR),1)
-	$(call erlang,$(call relx_tar.erl),-pa ebin/)
-endif
+	$(if $(filter-out 0,$(RELX_TAR)),$(call erlang,$(call relx_tar.erl),-pa ebin/))
 
 distclean-relx-rel:
 	$(gen_verbose) rm -rf $(RELX_OUTPUT_DIR)
@@ -3849,6 +3874,7 @@ ifeq ($(PLATFORM),msys2)
 RELX_REL_EXT := .cmd
 endif
 
+run:: RELX_TAR := 0
 run:: all
 	$(verbose) $(RELX_OUTPUT_DIR)/$(RELX_REL_NAME)/bin/$(RELX_REL_NAME)$(RELX_REL_EXT) $(RELX_REL_CMD)
 
