@@ -5,7 +5,10 @@ rgb_to_hsv({R, G, B}) ->
     {R1, G1, B1} = {R/255, G/255, B/255},
     Cmax = lists:max([R1, G1, B1]),
     Cmin = lists:min([R1, G1, B1]),
-    Hue = hue_calc(R1, G1, B1, Cmax, Cmin),
+    Hue = case hue_calc(R1, G1, B1, Cmax, Cmin) of
+            H when H < 0.0 -> H + 360;
+            H -> H
+          end,
     Sat = sat_calc(Cmax, Cmin),
     Value = Cmax,
     {Hue, Sat, Value}.
