@@ -35,6 +35,7 @@
 
 -type con_erase() :: back | forward | all.
 
+%%% Format
 -spec styles() -> [atom()].
 styles() ->
     [default, bold, faint, underline, italic,
@@ -100,6 +101,7 @@ reset_code(superscript) -> "75";
 reset_code(subscript) -> "75".
 
 
+%%% Colors
 basic_colors() -> [black, red, green, yellow,
                    blue, magenta, cyan, white].
 basic_colors_bright() -> [bright_black, bright_red, bright_green,
@@ -172,7 +174,7 @@ gradient(letter, Text, Color1, Color2) ->
     [[color(C), S] || {C, S} <- lists:zip(Colors, Sections)].
 
 
-
+%%% Cursor
 cursor_code(up) -> $A;
 cursor_code(down) -> $B;
 cursor_code(right) -> $C;
@@ -198,6 +200,7 @@ cursor({pos, X, Y}) ->
 cursor(Dir) ->
     ?CSI(cursor_code(Dir)).
 
+%%% Erase
 -doc "Erase the display before, after, or the entire screen.".
 -spec erase_display(con_erase()) -> iodata().
 erase_display(Mode) ->
