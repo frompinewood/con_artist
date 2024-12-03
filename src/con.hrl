@@ -1,3 +1,5 @@
+-record(rect, {x, y, width, height}).
+
 %% C0 Escape Sequences
 -define(NUL, 0). % Null
 -define(SOH, 1). % Start of Heading
@@ -32,11 +34,10 @@
 -define(RS, 30). % Record Seperator
 -define(US, 31). % Unit Seperator
 -define(ESC(IOData), [?ESC, IOData]).
-
 %% Fe Escape Sequences
 -define(SS2, ?ESC($N)).
 -define(SS3, ?ESC($O)).
 -define(ST, ?ESC($\\)).
--define(DCS(IOData), [?ESC($P), IOData, $ST]).
+-define(DCS(IOData), [?ESC($P), IOData, ?ST]).
 -define(CSI(IOData), [?ESC($[), IOData]).
 -define(OSC(IOData), [?ESC($]), IOData, ?ST]).
